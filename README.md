@@ -4,9 +4,11 @@ Two things collided to start this project.
 
 First, the Kimi team published [**Attention Residuals**](https://arxiv.org/abs/2603.15031) (arXiv 2603.15031), showing that replacing fixed residual connections with attention-based aggregation improves both training stability and downstream performance at scale.
 
+<img src="assets/residuals.png" width="500"/>
+
 Second, Andrej Karpathy asked whether **stochastic gradient descent could be replicated by attention**:
 
-![Karpathy tweet](assets/kaparthy.png)
+<img src="assets/kaparthy.png" width="500"/>
 
 When looking at Adam more carefully, I thought the **first moment EMA** is structurally identical to the bottleneck in a sequential modeling network. It compresses the entire gradient history into a single exponentially decayed running average, kinda like a hidden state of sequential networks.
 
