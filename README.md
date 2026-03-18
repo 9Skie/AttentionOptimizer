@@ -2,12 +2,12 @@
 
 This project came from two intersecting ideas.
 
-- First, Attention Residuals￼ showed that replacing fixed residual connections with attention-based aggregation can improve stability and performance at scale.
+First, Attention Residuals￼ showed that replacing fixed residual connections with attention-based ones can improve performance.
 
-<img src="assets/residuals.png" width="200"/>
+- <img src="assets/residuals.png" width="200"/>
 
 
-- Second, Andrej Karpathy asked whether stochastic gradient descent could be replicated by attention:
+- Second, Andrej Karpathy's question whether stochastic gradient descent could also use attention in it:
 
 <img src="assets/kaparthy.png" width="400"/>
 
@@ -26,59 +26,98 @@ Adam's update rule uses an EMA of gradients as its first moment:
 
 $$m_t = \beta_1 \, m_{t-1} + (1 - \beta_1) \, g_t$$
 
-This is a fixed exponential decay — every past gradient contributes, weighted only by how long ago it arrived. AttnOpt replaces this with an attention-weighted sum over a sliding window of recent gradients, letting the optimizer *selectively* decide which past steps are informative for the current update.
 
-### Mechanism
+AttnOpt replaces that fixed decay with a learned, selective attention over a sliding window:
+
+$$
+\theta_{t+1}
+
+\theta_t
+
+\eta ,
+\frac{
+\sum_{i=0}^{K-1} \alpha_i \hat{g}_{t-i}
+}{
+\sqrt{\hat{v}_t} + \varepsilon
+}
+$$
 
 
-Step t gradient:  g_t  →  ĝ_t = g_t / RMS(g_t)        (RMS normalize)
 
-Gradient stats:   s_t = [mean(ĝ_t),  E[ĝ_t²],  E[|ĝ_t|]]  ∈ ℝ³
 
-Key/Query input:  x_i = [ s_i ‖ pos_i ]   ∈ ℝ^(3 + d_pos)
+First normalize the current gradient:
 
-Attention:        q = x_t W_Q,   K = [x_t; x_{t-1}; … ; x_{t-K+1}] W_K
+$$
+\hat{g}_t = \frac{g_t}{\mathrm{RMS}(g_t)}
+$$
 
-Weights:          α = softmax( q Kᵀ / √d_head )   ∈ ℝ^K
+where
 
-Attended moment:  m_attn = Σᵢ αᵢ ĝ_{t-i}
-```
+$$
+\mathrm{RMS}(g_t) = \sqrt{\frac{1}{d}\sum_{j=1}^d g_{t,j}^2}
+$$
 
-The second moment (variance estimate) from Adam is kept unchanged.
+Then compute a compact statistic vector for each step:
 
-### Update Rules
+$$
+s_t =
+\begin{bmatrix}
+\mathrm{mean}(\hat{g}_t) \
+\mathbb{E}[\hat{g}_t^2] \
+\mathbb{E}[|\hat{g}_t|]
+\end{bmatrix}
+\in \mathbb{R}^3
+$$
 
-**Pure** — attention fully replaces the EMA:
+Concatenate this with a positional embedding:
 
-$$\theta_{t+1} = \theta_t - \eta \cdot \frac{m_{\text{attn}}}{\sqrt{\hat{v}_t} + \varepsilon}$$
+$$
+x_t = [, s_t ,|, p_t ,] \in \mathbb{R}^{3 + d_{\mathrm{pos}}}
+$$
 
-**Gated** — attention blends with the EMA:
+Over a window of length K, form the query and keys as
 
-$$\tilde{m} = (1 - \lambda)\, m_{\text{EMA}} + \lambda\, m_{\text{attn}}$$
+$$
+q_t = x_t W_Q
+$$
 
-$$\theta_{t+1} = \theta_t - \eta \cdot \frac{\tilde{m}}{\sqrt{\hat{v}_t} + \varepsilon}$$
+$$
+k_{t-i} = x_{t-i} W_K, \qquad i=0,1,\dots,K-1
+$$
 
-### Flow
+Then compute attention weights:
 
-```
-g_t ──► RMS-norm ──► stats s_t ──┐
-                                  ├──► Q, K projections
-g_{t-1} … g_{t-K} ── stats ──────┘
-                                  │
-                           softmax attention
-                                  │
-                            α-weighted sum
-                                  │
-                            m_attn (first moment)
-                                  │
-                    ┌─────────────┴─────────────┐
-                 pure mode                  gated mode
-                 m̃ = m_attn           m̃ = (1-λ)m_EMA + λ m_attn
-                                  │
-                         θ ← θ - lr · m̃ / (√v̂ + ε)
-```
+$$
+\alpha_i
 
----
+\frac{
+\exp!\left(\frac{q_t k_{t-i}^{\top}}{\sqrt{d_{\mathrm{head}}}}\right)
+}{
+\sum_{j=0}^{K-1}
+\exp!\left(\frac{q_t k_{t-j}^{\top}}{\sqrt{d_{\mathrm{head}}}}\right)
+}
+\qquad i=0,1,\dots,K-1
+$$
+
+Finally, define the attended first moment as a weighted sum of recent normalized gradients:
+
+$$
+m_{\mathrm{attn},t}
+
+\sum_{i=0}^{K-1} \alpha_i \hat{g}_{t-i}
+$$
+
+The second moment is kept the same as Adam:
+
+$$
+v_t = \beta_2 v_{t-1} + (1-\beta_2) g_t^2
+$$
+
+with the usual bias-corrected version
+
+$$
+\hat{v}_t = \frac{v_t}{1-\beta_2^t}
+$$
 
 ## Test Bed
 
