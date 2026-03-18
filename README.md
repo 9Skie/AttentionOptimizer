@@ -1,18 +1,20 @@
 ## Motivation
 
-Two things collided to start this project.
+This project came from two intersecting ideas.
 
-First, the Kimi team published [**Attention Residuals**](https://arxiv.org/abs/2603.15031) (arXiv 2603.15031), showing that replacing fixed residual connections with attention-based aggregation improves both training stability and downstream performance at scale.
+- First, Attention Residuals￼ showed that replacing fixed residual connections with attention-based aggregation can improve stability and performance at scale.
 
-<img src="assets/residuals.png" width="500"/>
+<img src="assets/residuals.png" width="200"/>
 
-Second, Andrej Karpathy asked whether **stochastic gradient descent could be replicated by attention**:
 
-<img src="assets/kaparthy.png" width="500"/>
+- Second, Andrej Karpathy asked whether stochastic gradient descent could be replicated by attention:
 
-When looking at Adam more carefully, I thought the **first moment EMA** is structurally identical to the bottleneck in a sequential modeling network. It compresses the entire gradient history into a single exponentially decayed running average, kinda like a hidden state of sequential networks.
+<img src="assets/kaparthy.png" width="400"/>
 
-So, instead of forcing optimization history through a single EMA bottleneck, can we let the optimizer use attention to attend over recent gradient history and decide what matters?
+
+That made me look at Adam’s first-moment EMA differently: it compresses gradient history into a single exponentially decayed running average, much like a hidden state bottleneck in sequential models.
+
+So the question becomes: instead of forcing optimization history through one EMA, can an optimizer use attention to attend over recent gradients and decide what matters?
 
 ---
 
@@ -28,7 +30,7 @@ This is a fixed exponential decay — every past gradient contributes, weighted 
 
 ### Mechanism
 
-```
+
 Step t gradient:  g_t  →  ĝ_t = g_t / RMS(g_t)        (RMS normalize)
 
 Gradient stats:   s_t = [mean(ĝ_t),  E[ĝ_t²],  E[|ĝ_t|]]  ∈ ℝ³
