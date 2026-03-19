@@ -22,6 +22,32 @@ from optimizers.attnopt import AttnOpt
 
 
 # ------------------------------------------------------------------ #
+# Combined optimizer wrapper                                          #
+# ------------------------------------------------------------------ #
+
+class CombinedOptimizer:
+    """Wraps two optimizers so train.py can call .step() / .zero_grad() once."""
+
+    def __init__(self, optimizers):
+        self.optimizers = optimizers
+
+    @property
+    def param_groups(self):
+        groups = []
+        for opt in self.optimizers:
+            groups.extend(opt.param_groups)
+        return groups
+
+    def zero_grad(self, set_to_none=False):
+        for opt in self.optimizers:
+            opt.zero_grad(set_to_none=set_to_none)
+
+    def step(self):
+        for opt in self.optimizers:
+            opt.step()
+
+
+# ------------------------------------------------------------------ #
 # Utilities                                                           #
 # ------------------------------------------------------------------ #
 
@@ -63,8 +89,24 @@ def build_optimizer(model, run_cfg):
 
     elif opt_name == "attnopt":
         acfg = run_cfg["attnopt_config"]
-        return AttnOpt(
-            model.parameters(),
+
+        # Split parameters: embedding → AdamW (sparse, huge),
+        # everything else → AttnOpt (per-element attention).
+        # Handle weight tying: wte.weight == lm_head.weight, deduplicate by id.
+        embed_ids = {id(model.wte.weight)}
+        embed_params, other_params = [], []
+        seen = set()
+        for name, p in model.named_parameters():
+            if id(p) in seen:
+                continue
+            seen.add(id(p))
+            if id(p) in embed_ids:
+                embed_params.append(p)
+            else:
+                other_params.append(p)
+
+        attn_opt = AttnOpt(
+            other_params,
             lr=lr,
             weight_decay=wd,
             context_length=acfg["context_length"],
@@ -72,6 +114,10 @@ def build_optimizer(model, run_cfg):
             gate_value=acfg["gate_value"],
             trainable_attn=acfg["trainable_attn"],
         )
+        embed_opt = torch.optim.AdamW(
+            embed_params, lr=lr, betas=(0.9, 0.95), eps=1e-8, weight_decay=wd,
+        )
+        return CombinedOptimizer([attn_opt, embed_opt])
 
     else:
         raise ValueError(f"Unknown optimizer: {opt_name}")
