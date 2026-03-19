@@ -51,4 +51,4 @@ Training budget: ~`1.07B` tokens per run (`4,096` steps × `262,144` tokens/step
 
 ## Results
 
-Live runs tracked on Weights & Biases (`attn-optimizer`). Loss curves compared in `analysis/results.ipynb`.
+Loss curves compared in `analysis/results.ipynb`.
