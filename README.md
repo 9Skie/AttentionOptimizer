@@ -1,17 +1,14 @@
 ## Motivation
 
-This project came from two intersecting ideas.
-
-First, Attention Residuals￼ showed that replacing fixed residual connections with attention-based ones can improve performance.
+[Attention Residuals](https://arxiv.org/abs/2603.15031) showed that replacing fixed residual connections with attention-based ones can improve performance.
 
 - <img src="assets/residuals.png" width="200"/>
 
-Second, Andrej Karpathy's question whether stochastic gradient descent could also use attention in it:
+Andrej Karpathy's followed up with a thought whether stochastic gradient descent could also use attention in it:
 
 - <img src="assets/kaparthy.png" width="400"/>
 
-
-That made me look at Adam’s first-moment EMA differently: it compresses gradient history into a single exponentially decayed running average, much like a hidden state bottleneck in sequential models.
+That made me look at Adam’s first-moment EMA differently: it compresses gradient history into a single exponentially decayed running average, much like a hidden state bottleneck in early sequential models.
 
 So the question becomes: instead of forcing optimization history through one EMA, can an optimizer use attention to attend over recent gradients and decide what matters?
 
@@ -19,29 +16,26 @@ So the question becomes: instead of forcing optimization history through one EMA
 
 ## AttnOpt: Attention as a First Moment
 
-### The Idea
-
 Adam's update rule uses an EMA of gradients as its first moment:
 
-$$m_t = \beta_1 \, m_{t-1} + (1 - \beta_1) \, g_t$$
+$$m_t = \beta_1 \ m_{t-1} + (1 - \beta_1) \, g_t$$
 
-AttnOpt replaces that fixed decay with a learned, selective attention over a sliding window of recent gradients:
+AttnOpt replaces that fixed decay with a learned, selective attention over a sliding window of the last $L$ gradients:
 
-$$m_t = \sum_{i=0}^{K-1} \alpha_i \,\hat{g}_{t-i}, \qquad \alpha = \text{softmax}\!\left(\frac{q_t K^\top}{\sqrt{d}}\right)$$
+$$m_t=\sum_{i=0}^{L-1}\alpha_i\cdot g_{t-i}$$
 
-where $\hat{g}_{t-i}$ are RMS-normalized gradients, and queries and keys are projections of per-step gradient statistics.
+$$q_t=x_tW_Q,\qquad k_{t-i}=x_{t-i}W_K,\qquad i\in{0,\dots,L-1}$$
+
+$$\alpha=\operatorname{softmax}!\left(\left[\frac{q_tk_t^\top}{\sqrt{d}},\frac{q_tk_{t-1}^\top}{\sqrt{d}},\dots,\frac{q_tk_{t-L+1}^\top}{\sqrt{d}}\right]\right)$$
+
 
 ---
 
-## Test Bed
+## Testing
 
 The model under test is **Karpathy's nanoGPT** (GPT-2), extended with the incremental architecture and training improvements documented in the [nanoGPT community discussion #481](https://github.com/karpathy/nanochat/discussions/481). Pre-training runs on HuggingFace's **[FineWeb](https://huggingface.co/datasets/HuggingFaceFW/fineweb)** dataset.
 
 The goal is to see whether AttnOpt can match or beat Adam/AdamW/Muon on validation loss at a fixed token budget.
-
----
-
-## Run Matrix
 
 Training budget: ~`1.07B` tokens per run (`4,096` steps × `262,144` tokens/step).
 
