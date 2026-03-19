@@ -17,7 +17,9 @@ def rms_norm_tensor(t, eps=1e-8):
     return t / rms
 
 
-def fixed_recency_embeddings(context_length: int, d_pos: int):
+def cosine_init_embeddings(context_length: int, d_pos: int):
+    """Cosine initialisation for positional embeddings — same as before, but
+    now used only as a starting point for learnable per-parameter embeddings."""
     positions = torch.arange(context_length, dtype=torch.float32).unsqueeze(1)
     scales = torch.arange(d_pos, dtype=torch.float32).unsqueeze(0) + 1.0
     return torch.cos(positions / scales)
@@ -93,9 +95,8 @@ class AttnOpt(Optimizer):
         self.context_length = context_length
         self.trainable_attn = trainable_attn
 
-        # Shared positional embeddings — same for all parameters, cached per device
-        self._pos_emb_cpu = fixed_recency_embeddings(context_length, d_pos)
-        self._pos_emb_cache: dict = {}
+        # Cosine init template — used to initialise per-parameter pos embeddings
+        self._pos_emb_init = cosine_init_embeddings(context_length, d_pos)
 
         self._rng = torch.Generator()
         self._rng.manual_seed(seed)
@@ -104,11 +105,6 @@ class AttnOpt(Optimizer):
     # Helpers                                                              #
     # ------------------------------------------------------------------ #
 
-    def _pos_emb(self, device):
-        if device not in self._pos_emb_cache:
-            self._pos_emb_cache[device] = self._pos_emb_cpu.to(device)
-        return self._pos_emb_cache[device]
-
     def _init_param_state(self, p: torch.Tensor):
         state = self.state[p]
         state["step"] = 0
@@ -116,23 +112,27 @@ class AttnOpt(Optimizer):
         state["exp_avg_sq"] = torch.zeros_like(p, dtype=torch.float32)
         state["grad_history"] = []   # list of (numel,) float32 tensors
 
-        # Per-parameter W_Q and W_K: (d_in, d_attn)
-        # These are tiny — only 2*(1+d_pos)*d_attn floats per parameter tensor.
+        # Per-parameter W_Q, W_K: (d_in, d_attn)
+        # Per-parameter pos_emb: (context_length, d_pos) — learnable, cosine init
+        # All three are tiny relative to the gradient history buffers.
         W_q = torch.randn(self.d_in, self.d_attn, generator=self._rng) * (self.d_in ** -0.5)
         W_k = torch.randn(self.d_in, self.d_attn, generator=self._rng) * (self.d_in ** -0.5)
-        state["W_q"] = W_q.to(p.device)
-        state["W_k"] = W_k.to(p.device)
+        pos  = self._pos_emb_init.clone()
+        state["W_q"]    = W_q.to(p.device)
+        state["W_k"]    = W_k.to(p.device)
+        state["pos_emb"] = pos.to(p.device)
         if self.trainable_attn:
             state["W_q"].requires_grad_(True)
             state["W_k"].requires_grad_(True)
+            state["pos_emb"].requires_grad_(True)
 
     def _attn_chunk(
         self,
-        g_chunk: torch.Tensor,      # (C,)
-        hist_chunk: torch.Tensor,   # (K, C)
-        W_q: torch.Tensor,          # (d_in, d_attn)
-        W_k: torch.Tensor,          # (d_in, d_attn)
-        pos_emb: torch.Tensor,      # (context_length, d_pos)
+        g_chunk:  torch.Tensor,   # (C,)
+        hist_chunk: torch.Tensor, # (K, C)
+        W_q:      torch.Tensor,   # (d_in, d_attn)
+        W_k:      torch.Tensor,   # (d_in, d_attn)
+        pos_emb:  torch.Tensor,   # (context_length, d_pos)  ← per-parameter, learnable
     ) -> torch.Tensor:
         """Compute per-element attended first moment for one chunk."""
         K, C = hist_chunk.shape
@@ -186,10 +186,9 @@ class AttnOpt(Optimizer):
 
     def _update_wqk(
         self,
-        state:     dict,
-        g_flat:    torch.Tensor,   # current gradient (target for prediction)
-        aux_lr:    float,
-        pos_emb:   torch.Tensor,
+        state:      dict,
+        g_flat:     torch.Tensor,   # current gradient (target for prediction)
+        aux_lr:     float,
         chunk_size: int,
     ):
         """
@@ -205,15 +204,16 @@ class AttnOpt(Optimizer):
         W_k = state["W_k"]
         history = torch.stack(history_list, dim=0)  # (K, n)
 
+        pos_emb = state["pos_emb"]
+
         with torch.enable_grad():
-            # Re-compute attention in grad-enabled mode using stored history
             n = g_flat.shape[0]
             parts = []
             for start in range(0, n, chunk_size):
                 end = min(start + chunk_size, n)
                 parts.append(
                     self._attn_chunk(
-                        history[0, start:end],       # query = most recent past grad
+                        history[0, start:end],
                         history[:, start:end],
                         W_q, W_k, pos_emb,
                     )
@@ -225,10 +225,10 @@ class AttnOpt(Optimizer):
                 pred.reshape(1, -1),
                 target.reshape(1, -1),
             ).mean()
-            grads = torch.autograd.grad(aux_loss, [W_q, W_k], allow_unused=True)
+            grads = torch.autograd.grad(aux_loss, [W_q, W_k, pos_emb], allow_unused=True)
 
         with torch.no_grad():
-            for tensor, grad in zip([W_q, W_k], grads):
+            for tensor, grad in zip([W_q, W_k, pos_emb], grads):
                 if grad is not None:
                     tensor.add_(grad, alpha=-aux_lr)
 
@@ -266,11 +266,9 @@ class AttnOpt(Optimizer):
                 g        = p.grad.float()
                 g_normed = rms_norm_tensor(g)
                 g_flat   = g_normed.flatten()
-                pos_emb  = self._pos_emb(p.device)
-
-                # Optionally update W_Q, W_K before consuming the new gradient
+                # Optionally update W_Q, W_K, pos_emb before consuming the new gradient
                 if trainable:
-                    self._update_wqk(state, g_flat, aux_lr, pos_emb, chunk_size)
+                    self._update_wqk(state, g_flat, aux_lr, chunk_size)
 
                 state["step"] += 1
                 t = state["step"]
@@ -286,7 +284,7 @@ class AttnOpt(Optimizer):
                     m_attn  = self._compute_attn(
                         g_flat, history,
                         state["W_q"], state["W_k"],
-                        pos_emb, chunk_size,
+                        state["pos_emb"], chunk_size,
                     )
 
                 # EMA first moment (kept for gated mode / bias correction)
