@@ -112,7 +112,6 @@ def build_optimizer(model, run_cfg):
             context_length=acfg["context_length"],
             moment_mode=acfg["moment_mode"],
             gate_value=acfg["gate_value"],
-            trainable_attn=acfg["trainable_attn"],
         )
         embed_opt = torch.optim.AdamW(
             embed_params, lr=lr, betas=(0.9, 0.95), eps=1e-8, weight_decay=wd,

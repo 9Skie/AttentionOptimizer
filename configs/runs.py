@@ -26,7 +26,6 @@ RUNS = {
         "attnopt_config": {
             "moment_mode": "pure",
             "context_length": 8,
-            "trainable_attn": True,
             "gate_value": 1.0,
         },
     },
@@ -37,7 +36,6 @@ RUNS = {
         "attnopt_config": {
             "moment_mode": "gated",
             "context_length": 8,
-            "trainable_attn": True,
             "gate_value": 0.5,
         },
     },
