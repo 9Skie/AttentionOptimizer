@@ -25,7 +25,7 @@ $$m_t=\sum_{i=0}^{L-1}\alpha_i\cdot g_{t-i}$$
 
 $$\alpha=\mathrm{softmax}\!\left(\left[\frac{q_tk_t^\top}{\sqrt{d}},\frac{q_tk_{t-1}^\top}{\sqrt{d}},\dots,\frac{q_tk_{t-L+1}^\top}{\sqrt{d}}\right]\right)$$
 
-$$q_t=x_tW_Q,\qquad k_{t-i}=x_{t-i}W_K,\qquad i\in{0,\dots,L-1}$$
+$$q_t=g_tW_Q,\qquad k_{t-i}=g_{t-i}W_K,\qquad i\in{0,\dots,L-1}$$
 
 
 ## Testing
