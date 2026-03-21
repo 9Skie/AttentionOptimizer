@@ -12,7 +12,6 @@ import os
 import time
 
 import torch
-import wandb
 
 from configs.runs import RUNS, TRAIN_CONFIG, MODEL_CONFIG
 from data.fineweb import get_dataloader
@@ -161,16 +160,6 @@ def train(run_id: str):
     log_path = os.path.join(log_dir, "metrics.jsonl")
     log_file = open(log_path, "w")
 
-    wandb.init(
-        project=os.environ.get("WANDB_PROJECT", "attn-optimizer"),
-        entity=os.environ.get("WANDB_ENTITY"),
-        name=run_id,
-        dir=log_dir,
-        config={**run_cfg, **tcfg},
-        tags=[run_cfg["optimizer"]],
-        force=True,
-    )
-
     # ---- Training ----
     max_steps = tcfg["max_steps"]
     warmup_steps = tcfg["warmup_steps"]
@@ -226,7 +215,6 @@ def train(run_id: str):
                 "lr": lr,
                 "tokens_per_sec": int(tokens_per_sec),
             }
-            wandb.log(log, step=step)
             log_file.write(json.dumps(log) + "\n")
             log_file.flush()
             print(
@@ -249,7 +237,6 @@ def train(run_id: str):
     print(f"[{run_id}] Saved checkpoint -> {ckpt_path}")
 
     log_file.close()
-    wandb.finish()
 
 
 # ------------------------------------------------------------------ #

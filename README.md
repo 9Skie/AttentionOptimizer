@@ -50,3 +50,7 @@ The goal is to see whether AttnOpt can match or beat Adam/AdamW/Muon on validati
 ## Results
 
 Loss curves compared in `analysis/results.ipynb`.
+
+### Baselines
+
+![Baseline loss curves](assets/baseline_loss.png)

@@ -2,5 +2,4 @@ torch>=2.3.0
 numpy
 datasets
 tiktoken
-wandb
 tqdm
