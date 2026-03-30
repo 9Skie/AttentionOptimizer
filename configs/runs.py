@@ -62,6 +62,36 @@ RUNS = {
             "context_length": 8,
         },
     },
+    "ATTNRAW-V3-8": {
+        "optimizer": "attnraw_v3",
+        "lr": 3e-4,
+        "weight_decay": 0.0,
+        "attnema_config": {
+            "context_length": 8,
+            "mix_beta": 0.9,
+        },
+    },
+    "ATTNOPT-B-8": {
+        "optimizer": "attnopt_b",
+        "lr": 3e-4,
+        "weight_decay": 0.0,
+        "attnopt_config": {
+            "context_length": 8,
+            "d_attn": 64,
+            "lr_meta": 1e-4,
+        },
+    },
+    "ATTNOPT-A-8": {
+        "optimizer": "attnopt_a",
+        "lr": 3e-4,
+        "weight_decay": 0.0,
+        "attnopt_config": {
+            "context_length": 8,
+            "d_attn": 64,
+            "lr_meta": 1e-4,
+            "meta_every": 10,
+        },
+    },
 }
 
 TRAIN_CONFIG = {

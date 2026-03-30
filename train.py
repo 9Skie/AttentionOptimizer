@@ -23,6 +23,9 @@ from optimizers.muon import Muon
 from optimizers.attnraw import AttnRaw
 from optimizers.avg import Avg
 from optimizers.attnraw_v2 import AttnRawV2
+from optimizers.attnraw_v3 import AttnRawV3
+from optimizers.attnopt_b import AttnOptB
+from optimizers.attnopt_a import AttnOptA
 
 
 # ------------------------------------------------------------------ #
@@ -81,12 +84,7 @@ def build_optimizer(model, run_cfg):
         return torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=wd)
 
     elif opt_name == "adam":
-        return torch.optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.95), eps=1e-8)
-
-    elif opt_name == "adamw":
-        return torch.optim.AdamW(
-            model.parameters(), lr=lr, betas=(0.9, 0.95), eps=1e-8, weight_decay=wd
-        )
+        return torch.optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.999), eps=1e-8)
 
     elif opt_name == "muon":
         embed_ids = {id(model.wte.weight)}
@@ -101,8 +99,8 @@ def build_optimizer(model, run_cfg):
             else:
                 other_params.append(p)
         muon_opt = Muon(other_params, lr=lr, weight_decay=wd)
-        embed_opt = torch.optim.AdamW(
-            embed_params, lr=lr, betas=(0.9, 0.95), eps=1e-8, weight_decay=wd,
+        embed_opt = torch.optim.Adam(
+            embed_params, lr=lr, betas=(0.9, 0.999), eps=1e-8, weight_decay=wd,
         )
         return CombinedOptimizer([muon_opt, embed_opt])
 
@@ -131,15 +129,15 @@ def build_optimizer(model, run_cfg):
             mix_beta=scfg.get("mix_beta", 0.9),
             raw_second_moment=scfg.get("raw_second_moment", False),
         )
-        embed_opt = torch.optim.AdamW(
-            embed_params, lr=lr, betas=(0.9, 0.95), eps=1e-8, weight_decay=wd,
+        embed_opt = torch.optim.Adam(
+            embed_params, lr=lr, betas=(0.9, 0.999), eps=1e-8, weight_decay=wd,
         )
         return CombinedOptimizer([avg_opt, embed_opt])
 
     elif opt_name == "attnraw":
         acfg = run_cfg["attnraw_config"]
 
-        # Split parameters: embedding → AdamW (sparse, huge),
+        # Split parameters: embedding → Adam (sparse, huge),
         # everything else → AttnOpt (tensorwise Type 1 attention).
         # Handle weight tying: wte.weight == lm_head.weight, deduplicate by id.
         embed_ids = {id(model.wte.weight)}
@@ -162,8 +160,8 @@ def build_optimizer(model, run_cfg):
             mix_beta=acfg.get("mix_beta", 0.9),
             raw_second_moment=acfg.get("raw_second_moment", False),
         )
-        embed_opt = torch.optim.AdamW(
-            embed_params, lr=lr, betas=(0.9, 0.95), eps=1e-8, weight_decay=wd,
+        embed_opt = torch.optim.Adam(
+            embed_params, lr=lr, betas=(0.9, 0.999), eps=1e-8, weight_decay=wd,
         )
         return CombinedOptimizer([attn_opt, embed_opt])
 
@@ -188,10 +186,67 @@ def build_optimizer(model, run_cfg):
             weight_decay=wd,
             context_length=ecfg["context_length"],
         )
-        embed_opt = torch.optim.AdamW(
-            embed_params, lr=lr, betas=(0.9, 0.95), eps=1e-8, weight_decay=wd,
+        embed_opt = torch.optim.Adam(
+            embed_params, lr=lr, betas=(0.9, 0.999), eps=1e-8, weight_decay=wd,
         )
         return CombinedOptimizer([attnema_opt, embed_opt])
+
+    elif opt_name == "attnraw_v3":
+        vcfg = run_cfg["attnema_config"]
+
+        embed_ids = {id(model.wte.weight)}
+        embed_params, other_params = [], []
+        seen = set()
+        for name, p in model.named_parameters():
+            if id(p) in seen:
+                continue
+            seen.add(id(p))
+            if id(p) in embed_ids:
+                embed_params.append(p)
+            else:
+                other_params.append(p)
+
+        attnema_opt = AttnRawV3(
+            other_params,
+            lr=lr,
+            weight_decay=wd,
+            context_length=vcfg["context_length"],
+            mix_beta=vcfg.get("mix_beta", 0.9),
+        )
+        embed_opt = torch.optim.Adam(
+            embed_params, lr=lr, betas=(0.9, 0.999), eps=1e-8, weight_decay=wd,
+        )
+        return CombinedOptimizer([attnema_opt, embed_opt])
+
+    elif opt_name in ("attnopt_b", "attnopt_a"):
+        acfg = run_cfg["attnopt_config"]
+        OptClass = AttnOptB if opt_name == "attnopt_b" else AttnOptA
+
+        embed_ids = {id(model.wte.weight)}
+        embed_params, other_params = [], []
+        seen = set()
+        for name, p in model.named_parameters():
+            if id(p) in seen:
+                continue
+            seen.add(id(p))
+            if id(p) in embed_ids:
+                embed_params.append(p)
+            else:
+                other_params.append(p)
+
+        attn_opt = OptClass(
+            other_params,
+            lr=lr,
+            lr_meta=acfg.get("lr_meta", 1e-4),
+            weight_decay=wd,
+            context_length=acfg["context_length"],
+            d_attn=acfg.get("d_attn", 64),
+            **( {"meta_every": acfg["meta_every"]} if opt_name == "attnopt_a" else {} ),
+        )
+        embed_opt = torch.optim.Adam(
+            embed_params, lr=lr, betas=(0.9, 0.999), eps=1e-8, weight_decay=wd,
+        )
+        return CombinedOptimizer([attn_opt, embed_opt])
 
     else:
         raise ValueError(f"Unknown optimizer: {opt_name}")
@@ -284,6 +339,27 @@ def train(run_id: str):
         # ---- Gradient clip + step ----
         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         optimizer.step()
+
+        # ---- AttnOptA meta-step (val split for W_Q/W_K update) ----
+        attnopt_a_inner = None
+        if isinstance(optimizer, CombinedOptimizer):
+            for opt in optimizer.optimizers:
+                if isinstance(opt, AttnOptA):
+                    attnopt_a_inner = opt
+                    break
+        elif isinstance(optimizer, AttnOptA):
+            attnopt_a_inner = optimizer
+
+        if attnopt_a_inner is not None:
+            meta_every = run_cfg["attnopt_config"].get("meta_every", 10)
+            if step % meta_every == 0 and step > 0:
+                try:
+                    val_x, val_y = next(data_iter)
+                except StopIteration:
+                    data_iter = iter(loader)
+                    val_x, val_y = next(data_iter)
+                val_x, val_y = val_x.to(device), val_y.to(device)
+                attnopt_a_inner.meta_step(model, val_x, val_y)
 
         # ---- Logging ----
         pbar.update(1)
