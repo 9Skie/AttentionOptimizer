@@ -22,6 +22,7 @@ from model.gpt import GPT, GPTConfig
 from optimizers.muon import Muon
 from optimizers.attnraw import AttnRaw
 from optimizers.avg import Avg
+from optimizers.attnema import AttnEMA
 
 
 # ------------------------------------------------------------------ #
@@ -165,6 +166,32 @@ def build_optimizer(model, run_cfg):
             embed_params, lr=lr, betas=(0.9, 0.95), eps=1e-8, weight_decay=wd,
         )
         return CombinedOptimizer([attn_opt, embed_opt])
+
+    elif opt_name == "attnema":
+        ecfg = run_cfg["attnema_config"]
+
+        embed_ids = {id(model.wte.weight)}
+        embed_params, other_params = [], []
+        seen = set()
+        for name, p in model.named_parameters():
+            if id(p) in seen:
+                continue
+            seen.add(id(p))
+            if id(p) in embed_ids:
+                embed_params.append(p)
+            else:
+                other_params.append(p)
+
+        attnema_opt = AttnEMA(
+            other_params,
+            lr=lr,
+            weight_decay=wd,
+            context_length=ecfg["context_length"],
+        )
+        embed_opt = torch.optim.AdamW(
+            embed_params, lr=lr, betas=(0.9, 0.95), eps=1e-8, weight_decay=wd,
+        )
+        return CombinedOptimizer([attnema_opt, embed_opt])
 
     else:
         raise ValueError(f"Unknown optimizer: {opt_name}")

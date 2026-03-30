@@ -54,6 +54,14 @@ RUNS = {
             "raw_second_moment": True,
         },
     },
+    "ATTNRAW-V2-8": {
+        "optimizer": "attnema",
+        "lr": 3e-4,
+        "weight_decay": 0.0,
+        "attnema_config": {
+            "context_length": 8,
+        },
+    },
 }
 
 TRAIN_CONFIG = {
