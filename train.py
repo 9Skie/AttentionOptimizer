@@ -88,7 +88,22 @@ def build_optimizer(model, run_cfg):
         )
 
     elif opt_name == "muon":
-        return Muon(model.parameters(), lr=lr, weight_decay=wd)
+        embed_ids = {id(model.wte.weight)}
+        embed_params, other_params = [], []
+        seen = set()
+        for name, p in model.named_parameters():
+            if id(p) in seen:
+                continue
+            seen.add(id(p))
+            if id(p) in embed_ids:
+                embed_params.append(p)
+            else:
+                other_params.append(p)
+        muon_opt = Muon(other_params, lr=lr, weight_decay=wd)
+        embed_opt = torch.optim.AdamW(
+            embed_params, lr=lr, betas=(0.9, 0.95), eps=1e-8, weight_decay=wd,
+        )
+        return CombinedOptimizer([muon_opt, embed_opt])
 
     elif opt_name == "avg":
         scfg = run_cfg["avg_config"]
