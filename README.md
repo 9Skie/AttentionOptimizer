@@ -16,7 +16,7 @@ So the question becomes: instead of forcing optimization history through one EMA
 
 Adam's update rule uses an EMA of gradients as its first moment:
 
-$$m_t = \beta_1 \ m_{t-1} + (1 - \beta_1) \, g_t$$
+$$m_t = \beta_1 \ m_{t-1} + (1 - \beta_1) g_t$$
 
 AttnOpt replaces that fixed decay with a learned, selective attention for each layer $\ell$ over a sliding window of the last $L$ gradients:
 
