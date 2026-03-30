@@ -28,7 +28,7 @@ $$
 
 $$
 \alpha^{(\ell)} =
-\operatorname{softmax}\!\left(
+\mathrm{softmax}\!\left(
 \left[
 s_1^{(\ell)}, s_2^{(\ell)}, \dots, s_{L-1}^{(\ell)}
 \right]
