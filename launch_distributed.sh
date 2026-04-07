@@ -12,8 +12,11 @@ if [ $# -gt 0 ] && [[ "$1" != --* ]]; then
 fi
 STATE_FILE="./experiment_state.json"
 
-# Remove old state file if exists (fresh start)
-rm -f $STATE_FILE
+# Remove old state file only if --fresh flag is passed
+if [[ " ${EXTRA_ARGS[*]} " =~ " --fresh " ]]; then
+    echo "Fresh start: removing existing state file"
+    rm -f $STATE_FILE
+fi
 
 echo "Launching distributed experiment on $GPUS GPUs..."
 echo "State file: $STATE_FILE"
