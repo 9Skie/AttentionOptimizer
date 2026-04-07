@@ -51,12 +51,18 @@ class ExperimentQueue:
                 json.dump(state, f, indent=2)
 
     def _read_state(self):
-        """Read state with shared lock."""
-        with open(self.state_file, "r") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_SH)
-            state = json.load(f)
-            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-        return state
+        """Read state with shared lock, retrying if file is empty/incomplete."""
+        while True:
+            try:
+                with open(self.state_file, "r") as f:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+                    content = f.read()
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                if content.strip():
+                    return json.loads(content)
+            except (json.JSONDecodeError, FileNotFoundError):
+                pass
+            time.sleep(0.05)
 
     def _write_state(self, state):
         """Write state with exclusive lock."""

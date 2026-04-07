@@ -24,6 +24,7 @@ echo "State file: $STATE_FILE"
 for gpu in $(seq 0 $((GPUS-1))); do
     echo "Starting GPU $gpu..."
     CUDA_VISIBLE_DEVICES=$gpu python run_distributed.py --gpu $gpu --state-file $STATE_FILE "${EXTRA_ARGS[@]}" &
+    sleep 2
 done
 
 echo ""
