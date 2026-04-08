@@ -20,9 +20,9 @@ from configs.runs import RUNS, TRAIN_CONFIG, MODEL_CONFIG
 from data.fineweb import get_dataloader
 from model.gpt import GPT, GPTConfig
 from optimizers.muon import Muon
-from optimizers.attnraw_v1_new import AttnRawV1
-from optimizers.attnraw_v2_new import AttnRawV2
-from optimizers.attnraw_v3_new import AttnRawV3
+from optimizers.attnraw_v1 import AttnRawV1
+from optimizers.attnraw_v2 import AttnRawV2
+from optimizers.attnraw_v3 import AttnRawV3
 from optimizers.simpleavg_v1 import SimpleAvgV1
 from optimizers.simpleavg_v2 import SimpleAvgV2
 from optimizers.simpleavg_v3 import SimpleAvgV3
