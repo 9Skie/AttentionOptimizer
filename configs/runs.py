@@ -3,7 +3,7 @@
 # - nanoGPT 44M
 # - Sweep over history length L ∈ {4, 8, 16}
 # - Sweep over temperature τ ∈ {0.5, 1.0, 2.0} for attention-based methods
-# - AttnRaw-v1/v2/v3, AttnPrec-v1/v2/v3 with L×τ sweep
+# - AttnRaw-v1/v2/v3
 # - SimpleAvg-v1/v2/v3 with only L sweep (no temperature)
 # - SGD and AdamW baselines
 
@@ -65,48 +65,6 @@ for L, tau in itertools.product(HISTORY_LENGTHS, TEMPERATURES):
     key = f"ATTNRAW-V3-L{L}-T{tau}"
     RUNS[key] = {
         "optimizer": "attnraw_v3",
-        "lr": 3e-4,
-        "weight_decay": 0.0,
-        "attn_config": {
-            "context_length": L,
-            "mix_beta": 0.9,
-            "temperature": tau,
-        },
-    }
-
-# --- AttnPrec-v1: keep both m_{t-1} and v_{t-1} ---
-for L, tau in itertools.product(HISTORY_LENGTHS, TEMPERATURES):
-    key = f"ATTPREC-V1-L{L}-T{tau}"
-    RUNS[key] = {
-        "optimizer": "attnprec_v1",
-        "lr": 3e-4,
-        "weight_decay": 0.0,
-        "attn_config": {
-            "context_length": L,
-            "mix_beta": 0.9,
-            "temperature": tau,
-        },
-    }
-
-# --- AttnPrec-v2: remove m_{t-1}, keep v_{t-1} ---
-for L, tau in itertools.product(HISTORY_LENGTHS, TEMPERATURES):
-    key = f"ATTPREC-V2-L{L}-T{tau}"
-    RUNS[key] = {
-        "optimizer": "attnprec_v2",
-        "lr": 3e-4,
-        "weight_decay": 0.0,
-        "attn_config": {
-            "context_length": L,
-            "mix_beta": 0.9,
-            "temperature": tau,
-        },
-    }
-
-# --- AttnPrec-v3: remove both m_{t-1} and v_{t-1} ---
-for L, tau in itertools.product(HISTORY_LENGTHS, TEMPERATURES):
-    key = f"ATTPREC-V3-L{L}-T{tau}"
-    RUNS[key] = {
-        "optimizer": "attnprec_v3",
         "lr": 3e-4,
         "weight_decay": 0.0,
         "attn_config": {
