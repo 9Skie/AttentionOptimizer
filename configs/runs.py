@@ -1,90 +1,96 @@
 # configs/runs.py
-# Unified gradient optimizer experiment matrix:
-# - SimpleAvg: true uniform average over K+1 gradient window
-# - AttnRaw: cosine attention over gradient window
-#   - include_g_t=True: g_t is part of attention window (G variants)
-#   - include_g_t=False: g_t blended separately via mix_beta (MIX variants)
+# Optimizer experiment matrix:
+# - SimpleAvg-V1: true uniform average over K+1 gradient window
+# - AttnRaw-V1: past-only attention + mix_beta blend
+# - AttnRaw-V1-G: g_t in window + mix_beta blend (G variant)
+# - AttnRaw-V2: g_t in window + EMA on first moment
+# - AttnRaw-V3: past-only attention + residual + EMA on top
+# - Muon: Newton-Schulz iteration on non-embedding params
 
-import itertools
-
-HISTORY_LENGTHS = [4, 8, 16]
-TEMPERATURES = [0.5, 1.0, 2.0]
-
-RUNS = {}
-
-# --- Baselines ---
-RUNS["SGD"] = {
-    "optimizer": "sgd",
-    "lr": 1e-2,
-}
-
-RUNS["ADAMW"] = {
-    "optimizer": "adamw",
-    "lr": 3e-4,
-    "weight_decay": 0.1,
-}
-
-RUNS["MUON"] = {
-    "optimizer": "muon",
-    "lr": 3e-4,
-}
-
-# --- SimpleAvg: true uniform average over K+1 gradient window (no EMA on numerator) ---
-for L in HISTORY_LENGTHS:
-    key = f"SIMPLEAVG-L{L}"
-    RUNS[key] = {
-        "optimizer": "simpleavg",
+RUNS = {
+    # --- Baselines ---
+    "MUON": {
+        "optimizer": "muon",
         "lr": 3e-4,
-        "weight_decay": 0.0,
-        "grad_opt_config": {
-            "context_length": L,
-        },
-    }
-
-# --- AttnRaw: g_t IN attention window (softmax over K+1 items) ---
-for L, tau in itertools.product(HISTORY_LENGTHS, TEMPERATURES):
-    key = f"ATTNRAW-G-L{L}-T{tau}"
-    RUNS[key] = {
-        "optimizer": "attnraw",
-        "lr": 3e-4,
-        "weight_decay": 0.0,
-        "grad_opt_config": {
-            "context_length": L,
-            "include_g_t": True,
-            "temperature": tau,
-        },
-    }
-
-# --- AttnRaw: g_t NOT in attention window (forced blend) ---
-for L, tau in itertools.product(HISTORY_LENGTHS, TEMPERATURES):
-    key = f"ATTNRAW-L{L}-T{tau}"
-    RUNS[key] = {
-        "optimizer": "attnraw",
-        "lr": 3e-4,
-        "weight_decay": 0.0,
-        "grad_opt_config": {
-            "context_length": L,
-            "include_g_t": False,
-            "temperature": tau,
-            "mix_beta": 0.9,
-        },
-    }
-
-# --- AttnRaw: g_t NOT in window, mix_beta sweep (L=4, T=1.0) ---
-MIX_BETAS = [0.9, 0.75, 0.5, 0.25, 0.1]
-for mix_beta in MIX_BETAS:
-    key = f"ATTNRAW-MIX{int(mix_beta * 100):02d}-L4-T1.0"
-    RUNS[key] = {
-        "optimizer": "attnraw",
+    },
+    # --- SimpleAvg: true uniform average over K+1 gradient window (no EMA on numerator) ---
+    "SIMPLEAVG-L4": {
+        "optimizer": "simpleavg_v1",
         "lr": 3e-4,
         "weight_decay": 0.0,
         "grad_opt_config": {
             "context_length": 4,
-            "include_g_t": False,
-            "temperature": 1.0,
-            "mix_beta": mix_beta,
         },
-    }
+    },
+    # --- AttnRaw V1: past-only attention + mix_beta blend ---
+    "ATTNRAW-V1-L4": {
+        "optimizer": "attnraw_v1",
+        "lr": 3e-4,
+        "weight_decay": 0.0,
+        "grad_opt_config": {
+            "context_length": 4,
+            "mix_beta": 0.9,
+        },
+    },
+    "ATTNRAW-V1-L4-MIX10": {
+        "optimizer": "attnraw_v1",
+        "lr": 3e-4,
+        "weight_decay": 0.0,
+        "grad_opt_config": {
+            "context_length": 4,
+            "mix_beta": 0.1,
+        },
+    },
+    # --- AttnRaw V1-G: g_t in window + mix_beta blend ---
+    "ATTNRAW-V1-G-L4": {
+        "optimizer": "attnraw_v1_g",
+        "lr": 3e-4,
+        "weight_decay": 0.0,
+        "grad_opt_config": {
+            "context_length": 4,
+            "temperature": 1.0,
+            "mix_beta": 0.9,
+        },
+    },
+    "ATTNRAW-V1-G-L4-T0.5": {
+        "optimizer": "attnraw_v1_g",
+        "lr": 3e-4,
+        "weight_decay": 0.0,
+        "grad_opt_config": {
+            "context_length": 4,
+            "temperature": 0.5,
+            "mix_beta": 0.9,
+        },
+    },
+    # --- AttnRaw V2: g_t in window + EMA on first moment ---
+    "ATTNRAW-V2-L4": {
+        "optimizer": "attnraw_v2",
+        "lr": 3e-4,
+        "weight_decay": 0.0,
+        "grad_opt_config": {
+            "context_length": 4,
+        },
+    },
+    # --- AttnRaw V3: past-only + residual + EMA on top ---
+    "ATTNRAW-V3-L4": {
+        "optimizer": "attnraw_v3",
+        "lr": 3e-4,
+        "weight_decay": 0.0,
+        "grad_opt_config": {
+            "context_length": 4,
+            "mix_beta": 0.1,
+        },
+    },
+    "ATTNRAW-V3-L4-MIX10": {
+        "optimizer": "attnraw_v3",
+        "lr": 3e-4,
+        "weight_decay": 0.0,
+        "grad_opt_config": {
+            "context_length": 4,
+            "mix_beta": 0.1,
+        },
+    },
+}
 
 TRAIN_CONFIG = {
     "max_tokens": 2_000_000_000,

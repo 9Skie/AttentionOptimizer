@@ -1,44 +1,34 @@
 #
-# AttnRaw: Cosine attention over gradient window.
+# AttnRaw V1: Cosine attention over PAST gradient window (no g_t).
 #
-# If include_g_t=True:
-#   window = [g_t, g_{t-1}, ..., g_{t-K}]  (K+1 items)
-#   scores = cos_sim(g_t, each_item)
-#   alpha = softmax(scores / T)
-#   g_bar = alpha @ window
+# g_t is NOT in the attention window. Instead, the current gradient is
+# blended separately via mix_beta:
 #
-# If include_g_t=False:
-#   past = [g_{t-1}, ..., g_{t-K}]  (K items)
-#   scores = cos_sim(g_t, each_past)
-#   alpha = softmax(scores / T)
-#   attended = alpha @ past
+#   scores = cos(g_t, each past grad)
+#   attended = softmax(scores/T) @ past_grads
 #   g_bar = mix_beta * g_t + (1 - mix_beta) * attended
 #
+# No EMA on numerator — g_bar is used directly.
 # Second moment uses EMA for normalization.
-# No EMA on first moment — g_bar is used directly.
 #
 
 import torch
 from torch.optim import Optimizer
 
 
-class AttnRaw(Optimizer):
+class AttnRawV1(Optimizer):
     """
-    Cosine attention over gradient window with configurable options.
+    AttnRaw V1: cosine attention over past gradient window, with forced mix.
 
     Args:
         params:         model parameters
         lr:             learning rate
-        betas:          (beta2,) — EMA decay for second moment only
-        eps:            numerical stability term
-        weight_decay:   decoupled weight decay
-        context_length: number of PAST gradients to store (K)
-                         If include_g_t=True, window is K+1 items
-        include_g_t:    if True, g_t is part of attention window
-                         if False, g_t is blended separately via mix_beta
-        temperature:    softmax temperature for attention scores
-        mix_beta:       weight on current gradient when include_g_t=False
-                         g_bar = mix * g_t + (1-mix) * attended_past
+        betas:          (beta2,) — EMA decay for second moment
+        eps:             numerical stability term
+        weight_decay:    decoupled weight decay
+        context_length:   number of past gradients to store (K)
+        temperature:     softmax temperature for attention scores
+        mix_beta:        weight on current gradient (0.9 = 90% current / 10% past)
     """
 
     def __init__(
@@ -49,7 +39,6 @@ class AttnRaw(Optimizer):
         eps=1e-8,
         weight_decay=0.0,
         context_length=8,
-        include_g_t=True,
         temperature=1.0,
         mix_beta=0.9,
     ):
@@ -66,7 +55,6 @@ class AttnRaw(Optimizer):
             eps=eps,
             weight_decay=weight_decay,
             context_length=context_length,
-            include_g_t=include_g_t,
             temperature=temperature,
             mix_beta=mix_beta,
         )
@@ -81,16 +69,16 @@ class AttnRaw(Optimizer):
     def _compute_attention(
         self,
         g_flat: torch.Tensor,
-        window: torch.Tensor,
+        history: torch.Tensor,
         temperature: float,
     ) -> torch.Tensor:
-        """Cosine attention over window."""
+        """Cosine attention over past gradients (g_t NOT included)."""
         g_norm = g_flat.norm().clamp(min=1e-8)
-        window_norms = window.norm(dim=1).clamp(min=1e-8)
-        scores = window @ g_flat
-        scores = scores / (window_norms * g_norm)
+        history_norms = history.norm(dim=1).clamp(min=1e-8)
+        scores = history @ g_flat
+        scores = scores / (history_norms * g_norm)
         alpha = torch.softmax(scores / temperature, dim=0)
-        return alpha @ window
+        return alpha @ history
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -105,7 +93,6 @@ class AttnRaw(Optimizer):
             eps = group["eps"]
             wd = group["weight_decay"]
             K = group["context_length"]
-            include_g_t = group["include_g_t"]
             temperature = group["temperature"]
             mix_beta = group["mix_beta"]
 
@@ -124,17 +111,12 @@ class AttnRaw(Optimizer):
                 t = state["step"]
 
                 past = state["grad_history"][:K]
-
-                if include_g_t:
-                    window = torch.stack([g_flat] + past, dim=0)
-                    g_bar_flat = self._compute_attention(g_flat, window, temperature)
+                if past:
+                    history = torch.stack(past, dim=0)
+                    attended = self._compute_attention(g_flat, history, temperature)
+                    g_bar_flat = mix_beta * g_flat + (1.0 - mix_beta) * attended
                 else:
-                    if past:
-                        history = torch.stack(past, dim=0)
-                        attended = self._compute_attention(g_flat, history, temperature)
-                        g_bar_flat = mix_beta * g_flat + (1.0 - mix_beta) * attended
-                    else:
-                        g_bar_flat = g_flat
+                    g_bar_flat = g_flat
 
                 g_bar = g_bar_flat.reshape_as(p)
 

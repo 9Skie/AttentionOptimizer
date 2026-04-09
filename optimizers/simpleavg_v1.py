@@ -1,5 +1,5 @@
 #
-# SimpleAvg: True uniform average over gradient window.
+# SimpleAvg V1: True uniform average over gradient window.
 #
 # g_bar = mean([g_t, g_{t-1}, ..., g_{t-K}])
 # Second moment uses EMA for normalization.
@@ -10,7 +10,7 @@ import torch
 from torch.optim import Optimizer
 
 
-class SimpleAvg(Optimizer):
+class SimpleAvgV1(Optimizer):
     """
     True uniform average over gradient window (including current gradient).
 
@@ -25,7 +25,7 @@ class SimpleAvg(Optimizer):
         eps:            numerical stability term
         weight_decay:   decoupled weight decay
         context_length: number of PAST gradients to store (K)
-                         Window includes g_t, total K+1 gradients
+                        Window includes g_t, total K+1 gradients
     """
 
     def __init__(

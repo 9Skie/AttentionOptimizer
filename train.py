@@ -20,8 +20,11 @@ from configs.runs import RUNS, TRAIN_CONFIG, MODEL_CONFIG
 from data.fineweb import get_dataloader
 from model.gpt import GPT, GPTConfig
 from optimizers.muon import Muon
-from optimizers.attnraw import AttnRaw
-from optimizers.simpleavg import SimpleAvg
+from optimizers.attnraw_v1 import AttnRawV1
+from optimizers.attnraw_v1_g import AttnRawV1G
+from optimizers.attnraw_v2 import AttnRawV2
+from optimizers.attnraw_v3 import AttnRawV3
+from optimizers.simpleavg_v1 import SimpleAvgV1
 
 
 # ------------------------------------------------------------------ #
@@ -147,26 +150,54 @@ def build_optimizer(model, run_cfg):
         )
         return CombinedOptimizer([muon_opt, embed_opt])
 
-    elif opt_name in ("attnraw", "simpleavg"):
+    elif opt_name in (
+        "simpleavg_v1",
+        "attnraw_v1",
+        "attnraw_v1_g",
+        "attnraw_v2",
+        "attnraw_v3",
+    ):
         cfg = run_cfg.get("grad_opt_config", {})
         embed_params, other_params = _split_embed_params(model)
 
-        if opt_name == "simpleavg":
-            grad_opt = SimpleAvg(
+        if opt_name == "simpleavg_v1":
+            grad_opt = SimpleAvgV1(
                 other_params,
                 lr=lr,
                 weight_decay=wd,
                 context_length=cfg.get("context_length", 4),
             )
-        else:
-            grad_opt = AttnRaw(
+        elif opt_name == "attnraw_v1":
+            grad_opt = AttnRawV1(
                 other_params,
                 lr=lr,
                 weight_decay=wd,
                 context_length=cfg.get("context_length", 4),
-                include_g_t=cfg.get("include_g_t", True),
+                mix_beta=cfg.get("mix_beta", 0.9),
+            )
+        elif opt_name == "attnraw_v1_g":
+            grad_opt = AttnRawV1G(
+                other_params,
+                lr=lr,
+                weight_decay=wd,
+                context_length=cfg.get("context_length", 4),
                 temperature=cfg.get("temperature", 1.0),
                 mix_beta=cfg.get("mix_beta", 0.9),
+            )
+        elif opt_name == "attnraw_v2":
+            grad_opt = AttnRawV2(
+                other_params,
+                lr=lr,
+                weight_decay=wd,
+                context_length=cfg.get("context_length", 4),
+            )
+        else:  # attnraw_v3
+            grad_opt = AttnRawV3(
+                other_params,
+                lr=lr,
+                weight_decay=wd,
+                context_length=cfg.get("context_length", 4),
+                mix_beta=cfg.get("mix_beta", 0.1),
             )
 
         embed_opt = torch.optim.Adam(
