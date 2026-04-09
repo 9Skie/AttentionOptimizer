@@ -1,0 +1,25 @@
+Could not auto-detect GPUs, defaulting to 1
+Using 1 GPU(s)
+
+Total runs: 9
+
+Starting fresh (--fresh flag set)
+Deleted experiment_state.json
+Initializing new state file
+Current state:
+Progress: 0/9 completed, 0 running, 9 remaining
+
+Launching 1 worker(s)...
+
+[GPU0] Starting worker (CUDA_VISIBLE_DEVICES=0)
+
+============================================
+[GPU0] Starting: SIMPLEAVG-L4
+============================================
+/opt/homebrew/lib/python3.10/site-packages/torch/utils/data/dataloader.py:1118: UserWarning: 'pin_memory' argument is set as true but not supported on MPS now, device pinned memory won't be used.
+  super().__init__(loader)
+[SIMPLEAVG-L4] params: 46.2M
+[SIMPLEAVG-L4] steps: 7630 (~2,000,158,720 tokens)
+Loaded 1,000,000,000 tokens from 10 shard(s).
+SIMPLEAVG-L4:   0%|          | 0/7630 [00:00<?, ?step/s]/opt/homebrew/lib/python3.10/site-packages/torch/_inductor/lowering.py:2156: UserWarning: Torchinductor does not support code generation for complex operators. Performance may be worse than eager.
+  warnings.warn(
