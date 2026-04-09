@@ -65,7 +65,10 @@ if [[ -n "$FORCE_N_GPUS" ]]; then
     echo "Forcing N_GPUS=$N_GPUS (user override)"
 else
     if command -v nvidia-smi &> /dev/null; then
-        N_GPUS=$(nvidia-smi -L 2>/dev/null | wc -l)
+        N_GPUS=$(nvidia-smi --query-gpu=gpu_name --format=csv,noheader 2>/dev/null | wc -l)
+        if [[ "$N_GPUS" -eq 0 ]]; then
+            N_GPUS=$(nvidia-smi -L 2>/dev/null | wc -l)
+        fi
         echo "Auto-detected $N_GPUS GPU(s) via nvidia-smi"
     elif command -v rocm-smi &> /dev/null; then
         N_GPUS=$(rocm-smi --listgpus 2>/dev/null | wc -l)
@@ -116,12 +119,21 @@ init_state() {
 }
 
 acquire_lock() {
-    exec 200>"$LOCK_FILE"
-    flock -w 30 200 || { echo "ERROR: Could not acquire lock"; exit 1; }
+    local max_wait=30
+    local waited=0
+    while [[ -f "$LOCK_FILE" ]] && ((waited < max_wait)); do
+        sleep 1
+        waited=$((waited + 1))
+    done
+    if [[ -f "$LOCK_FILE" ]]; then
+        echo "ERROR: Could not acquire lock (timeout)"
+        exit 1
+    fi
+    touch "$LOCK_FILE"
 }
 
 release_lock() {
-    exec 200>&-
+    rm -f "$LOCK_FILE"
 }
 
 read_state() {
