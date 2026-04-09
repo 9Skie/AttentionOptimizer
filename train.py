@@ -217,11 +217,17 @@ def train(
         raise ValueError("Use only one of max_steps or max_tokens.")
 
     tokens_per_step = _tokens_per_step(tcfg)
-    max_steps = tcfg["max_steps"]
+    if max_tokens is None:
+        if "max_tokens" in tcfg:
+            max_tokens = tcfg["max_tokens"]
+        elif "max_steps" in tcfg:
+            max_steps_override = max_steps_override or tcfg.get("max_steps")
     if max_tokens is not None:
         max_steps = math.ceil(max_tokens / tokens_per_step)
     elif max_steps_override is not None:
         max_steps = max_steps_override
+    else:
+        raise ValueError("Either max_tokens or max_steps must be set.")
 
     if max_steps <= 0:
         raise ValueError("max_steps must be positive.")
