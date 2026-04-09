@@ -15,6 +15,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+mkdir -p logs
+
 STATE_FILE="experiment_state.json"
 LOCK_FILE="${STATE_FILE}.lock"
 
@@ -254,7 +256,7 @@ worker() {
         
         # Run the experiment with a timeout safety net
         # If it crashes, we'll catch it and mark appropriately
-        if python train.py --run_id "$run" 2>&1 | tee "logs/${run}.log"; then
+        if python train.py --run_id "$run"; then
             result=0
         else
             result=$?
