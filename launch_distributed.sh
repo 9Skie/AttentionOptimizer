@@ -65,10 +65,7 @@ if [[ -n "$FORCE_N_GPUS" ]]; then
     echo "Forcing N_GPUS=$N_GPUS (user override)"
 else
     if command -v nvidia-smi &> /dev/null; then
-        N_GPUS=$(nvidia-smi --query-gpu=gpu_name --format=csv,noheader 2>/dev/null | wc -l)
-        if [[ "$N_GPUS" -eq 0 ]]; then
-            N_GPUS=$(nvidia-smi -L 2>/dev/null | wc -l)
-        fi
+        N_GPUS=$(nvidia-smi -L 2>/dev/null | wc -l)
         echo "Auto-detected $N_GPUS GPU(s) via nvidia-smi"
     elif command -v rocm-smi &> /dev/null; then
         N_GPUS=$(rocm-smi --listgpus 2>/dev/null | wc -l)
@@ -89,15 +86,15 @@ echo ""
 # Define runs
 # -------------------------------------------------------------------
 RUNS=(
-    "SIMPLEAVG-L4"
-    "ATTNRAW-V1-L4"
-    "ATTNRAW-V1-L4-MIX10"
-    "ATTNRAW-V1-G-L4"
     "ATTNRAW-V1-G-L4-T0.5"
-    "ATTNRAW-V2-L4"
-    "ATTNRAW-V3-L4"
-    "ATTNRAW-V3-L4-MIX10"
-    "MUON"
+    "ATTNRAW-V1-G-L4"
+    "ATTNRAW-V1-G-L4-T2.0"
+    "ATTNRAW-MIX90-L4-T1.0"
+    "ATTNRAW-MIX75-L4-T1.0"
+    "ATTNRAW-MIX50-L4-T1.0"
+    "ATTNRAW-MIX25-L4-T1.0"
+    "ATTNRAW-V1-L4-MIX10"
+    "SIMPLEAVG-L4"
 )
 
 N_RUNS=${#RUNS[@]}
@@ -119,21 +116,12 @@ init_state() {
 }
 
 acquire_lock() {
-    local max_wait=30
-    local waited=0
-    while [[ -f "$LOCK_FILE" ]] && ((waited < max_wait)); do
-        sleep 1
-        waited=$((waited + 1))
-    done
-    if [[ -f "$LOCK_FILE" ]]; then
-        echo "ERROR: Could not acquire lock (timeout)"
-        exit 1
-    fi
-    touch "$LOCK_FILE"
+    exec 200>"$LOCK_FILE"
+    flock -w 30 200 || { echo "ERROR: Could not acquire lock"; exit 1; }
 }
 
 release_lock() {
-    rm -f "$LOCK_FILE"
+    exec 200>&-
 }
 
 read_state() {
@@ -236,8 +224,7 @@ worker() {
     local gpu_id="$1"
     local gpu_name="GPU${gpu_id}"
     
-    export CUDA_VISIBLE_DEVICES="$gpu_id"
-    echo "[$gpu_name] Starting worker (CUDA_VISIBLE_DEVICES=$gpu_id)"
+    echo "[$gpu_name] Starting worker"
     
     while true; do
         acquire_lock
@@ -269,7 +256,7 @@ worker() {
         
         # Run the experiment with a timeout safety net
         # If it crashes, we'll catch it and mark appropriately
-        if python train.py --run_id "$run"; then
+        if CUDA_VISIBLE_DEVICES=$gpu_id python train.py --run_id "$run"; then
             result=0
         else
             result=$?
