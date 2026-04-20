@@ -123,6 +123,7 @@ IFS=',' read -r -a EXPERIMENT_2_SEEDS <<< "$SEEDS_CSV"
 STATE_DIR="$ROOT_DIR/.run_experiments_parallel"
 JOB_FILE="$STATE_DIR/jobs.tsv"
 LOCK_FILE="$STATE_DIR/jobs.lock"
+FAILED_FILE="$STATE_DIR/failed.tsv"
 mkdir -p "$STATE_DIR"
 
 cleanup() {
@@ -139,6 +140,7 @@ append_job() {
 }
 
 : > "$JOB_FILE"
+: > "$FAILED_FILE"
 
 if [[ -z "${HF_TOKEN:-}" ]]; then
     echo "ERROR: HF_TOKEN is not set. FineWeb requires a HuggingFace token."
@@ -197,6 +199,19 @@ claim_job() {
     return 0
 }
 
+record_failure() {
+    local gpu_name="$1"
+    local run_id="$2"
+    local seed="$3"
+    local exit_code="$4"
+
+    exec 8>"$LOCK_FILE"
+    flock 8
+    printf '%s\t%s\t%s\t%s\n' "$gpu_name" "$run_id" "$seed" "$exit_code" >> "$FAILED_FILE"
+    flock -u 8
+    exec 8>&-
+}
+
 worker() {
     local gpu_id="$1"
     local gpu_name="GPU${gpu_id}"
@@ -213,12 +228,17 @@ worker() {
         mkdir -p "$log_dir" "$ckpt_dir"
 
         echo "[$gpu_name] Starting $run_id (seed=$seed)"
-        LOG_DIR="$log_dir" \
-        CKPT_DIR="$ckpt_dir" \
-        SEED="$seed" \
-        CUDA_VISIBLE_DEVICES="$gpu_id" \
-        python "$ROOT_DIR/train.py" --run_id "$run_id"
-        echo "[$gpu_name] Finished $run_id (seed=$seed)"
+        if LOG_DIR="$log_dir" \
+            CKPT_DIR="$ckpt_dir" \
+            SEED="$seed" \
+            CUDA_VISIBLE_DEVICES="$gpu_id" \
+            python "$ROOT_DIR/train.py" --run_id "$run_id"; then
+            echo "[$gpu_name] Finished $run_id (seed=$seed)"
+        else
+            exit_code=$?
+            echo "[$gpu_name] FAILED $run_id (seed=$seed, exit=$exit_code)"
+            record_failure "$gpu_name" "$run_id" "$seed" "$exit_code"
+        fi
     done
 }
 
@@ -227,4 +247,13 @@ for ((gpu = 0; gpu < N_GPUS; gpu++)); do
 done
 
 wait
-echo "All experiment jobs completed."
+
+if [[ -s "$FAILED_FILE" ]]; then
+    echo "Some experiment jobs failed:"
+    while IFS=$'\t' read -r gpu_name run_id seed exit_code; do
+        echo "  [$gpu_name] $run_id (seed=$seed, exit=$exit_code)"
+    done < "$FAILED_FILE"
+    exit 1
+fi
+
+echo "All experiment jobs completed successfully."
