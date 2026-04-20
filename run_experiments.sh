@@ -6,6 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXPERIMENT_SELECTOR="all"
 EXPERIMENT_1_SEED=42
 SEEDS_CSV="42,67,69"
+FAILED_RUNS=()
 
 EXPERIMENT_1_RUNS=(
     "ADAMW"
@@ -112,6 +113,7 @@ run_group() {
     local seed="$4"
     shift 4
     local run_ids=("$@")
+    local group_failed=0
 
     mkdir -p "$log_dir" "$ckpt_dir"
 
@@ -129,29 +131,56 @@ run_group() {
         echo "--------------------------------------------"
         echo "Starting ${run_id}"
         echo "--------------------------------------------"
-        LOG_DIR="$log_dir" \
-        CKPT_DIR="$ckpt_dir" \
-        SEED="$seed" \
-        python "$ROOT_DIR/train.py" --run_id "$run_id"
+        if LOG_DIR="$log_dir" \
+            CKPT_DIR="$ckpt_dir" \
+            SEED="$seed" \
+            python "$ROOT_DIR/train.py" --run_id "$run_id"; then
+            echo "Finished ${run_id}"
+        else
+            local exit_code=$?
+            echo "FAILED ${run_id} (seed=${seed}, exit=${exit_code})"
+            FAILED_RUNS+=("${group_name}"$'\t'"${seed}"$'\t'"${run_id}"$'\t'"${exit_code}")
+            group_failed=1
+        fi
     done
+
+    return "$group_failed"
 }
 
+had_failure=0
+
 if [[ "$EXPERIMENT_SELECTOR" == "1" || "$EXPERIMENT_SELECTOR" == "all" ]]; then
-    run_group \
+    if ! run_group \
         "Experiment 1" \
         "$ROOT_DIR/logs/experiment_1" \
         "$ROOT_DIR/checkpoints/experiment_1" \
         "$EXPERIMENT_1_SEED" \
-        "${EXPERIMENT_1_RUNS[@]}"
+        "${EXPERIMENT_1_RUNS[@]}"; then
+        had_failure=1
+    fi
 fi
 
 if [[ "$EXPERIMENT_SELECTOR" == "2" || "$EXPERIMENT_SELECTOR" == "all" ]]; then
     for seed in "${EXPERIMENT_2_SEEDS[@]}"; do
-        run_group \
+        if ! run_group \
             "Experiment 2 (seed ${seed})" \
             "$ROOT_DIR/logs/experiment_2/seed_${seed}" \
             "$ROOT_DIR/checkpoints/experiment_2/seed_${seed}" \
             "$seed" \
-            "${EXPERIMENT_2_RUNS[@]}"
+            "${EXPERIMENT_2_RUNS[@]}"; then
+            had_failure=1
+        fi
     done
 fi
+
+if [[ "$had_failure" -ne 0 ]]; then
+    echo ""
+    echo "Some experiment jobs failed:"
+    for entry in "${FAILED_RUNS[@]}"; do
+        IFS=$'\t' read -r group_name seed run_id exit_code <<< "$entry"
+        echo "  [${group_name}] ${run_id} (seed=${seed}, exit=${exit_code})"
+    done
+    exit 1
+fi
+
+echo "All experiment jobs completed successfully."

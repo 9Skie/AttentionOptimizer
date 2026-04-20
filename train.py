@@ -269,6 +269,8 @@ def train(
     env_checkpoint_every = os.environ.get("CHECKPOINT_EVERY")
     env_resume_from = os.environ.get("RESUME_FROM")
     env_seed = os.environ.get("SEED")
+    env_micro_batch_size = os.environ.get("MICRO_BATCH_SIZE")
+    env_grad_accum_steps = os.environ.get("GRAD_ACCUM_STEPS")
 
     if max_steps_override is None and env_max_steps:
         max_steps_override = _parse_count(env_max_steps)
@@ -280,6 +282,15 @@ def train(
         resume_from = env_resume_from
     if seed_override is None and env_seed:
         seed_override = _parse_count(env_seed)
+    if env_micro_batch_size:
+        tcfg["micro_batch_size"] = _parse_count(env_micro_batch_size)
+    if env_grad_accum_steps:
+        tcfg["grad_accum_steps"] = _parse_count(env_grad_accum_steps)
+
+    if tcfg["micro_batch_size"] <= 0:
+        raise ValueError("micro_batch_size must be positive.")
+    if tcfg["grad_accum_steps"] <= 0:
+        raise ValueError("grad_accum_steps must be positive.")
 
     if max_steps_override is not None and max_tokens is not None:
         raise ValueError("Use only one of max_steps or max_tokens.")
