@@ -166,6 +166,12 @@ logs/
 
 Run ids are kept unchanged. Seed separation for Experiment 2 happens at the folder level, not by renaming runs.
 
+## Logging Note
+
+- Metrics are written to `metrics.jsonl` at `log_interval` boundaries (default: every 25 steps).
+- The training loop now performs a final flush after the loop so the terminal `max_steps` row (for example `7500`) is also written.
+- Note: jobs that were already running before this code update keep the old behavior until restarted.
+
 ## Current Status
 
 The original runs in this repo were useful for exploration, but the optimizer implementations and experiment structure have since been cleaned up. The next step is to rerun the matrix under the current definitions above.

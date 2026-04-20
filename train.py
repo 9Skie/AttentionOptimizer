@@ -401,6 +401,7 @@ def train(
     model.train()
     step = start_step
     t0 = time.time()
+    last_logged_step = start_step
 
     pbar = tqdm(total=max_steps, desc=run_id, unit="step", initial=step)
     while step < max_steps:
@@ -458,12 +459,33 @@ def train(
                 tok_s=f"{tokens_per_sec / 1e3:.1f}k",
             )
             t0 = time.time()
+            last_logged_step = step
 
         step += 1
         if checkpoint_enabled and checkpoint_every and step % checkpoint_every == 0:
             save_checkpoint(step, ckpt_latest_path)
 
     pbar.close()
+
+    # Ensure final step is always logged (e.g., step 7500).
+    if step > 0 and step != last_logged_step:
+        dt = max(time.time() - t0, 1e-8)
+        interval_steps = step - last_logged_step
+        tokens_per_sec = (
+            tcfg["micro_batch_size"]
+            * tcfg["seq_len"]
+            * grad_accum
+            * interval_steps
+            / dt
+        )
+        log = {
+            "step": step,
+            "loss": accum_loss,
+            "lr": lr,
+            "tokens_per_sec": int(tokens_per_sec),
+        }
+        log_file.write(json.dumps(log) + "\n")
+        log_file.flush()
 
     # ---- Save checkpoint ----
     if checkpoint_enabled:

@@ -302,7 +302,7 @@ TRAIN_CONFIG = {
     "grad_accum_steps": 8,
     "seq_len": 1024,
     "grad_clip": 1.0,
-    "log_interval": 100,
+    "log_interval": 25,
     "seed": 42,
 }
 
