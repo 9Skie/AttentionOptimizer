@@ -1,32 +1,32 @@
 #
-# AttnRaw V2: Fresh m_t, EMA on v_t.
+# SimpleAvg V2: Past-only uniform average + explicit mix + fresh m + EMA on v.
 #
-# attended = attention(g_t, [g_t-1, g_t-2, ..., g_t-L])
-# blended = mix * g_t + (1 - mix) * attended
-# m_t = blended (fresh, no EMA on m)
-# v_t = beta2 * v_t-1 + (1 - beta2) * blended^2 (EMA on v)
-# theta -= lr * m_t / (sqrt(v_t) + eps)
+# g_t is NOT in the averaged window. Average is computed over past gradients.
+# g_t is blended back in via explicit mix, matching AttnRaw V2 structure.
+# m_t is fresh (no EMA), v_t uses EMA.
 #
-# State kept: v_t-1 only (no m_t-1)
+#   attended = mean([g_t-1, g_t-2, ..., g_t-L])
+#   blended  = mix * g_t + (1 - mix) * attended
+#   m_t = blended (fresh)
+#   v_t = beta2 * v_t-1 + (1 - beta2) * blended^2
 #
 
 import torch
 from torch.optim import Optimizer
 
 
-class AttnRawV2(Optimizer):
+class SimpleAvgV2(Optimizer):
     """
-    AttnRaw V2: past-only attention, fresh m_t, EMA on v_t.
+    SimpleAvg V2: past-only uniform average, explicit mix with g_t, fresh m, EMA on v.
 
     Args:
         params:         model parameters
         lr:             learning rate
-        betas:          (beta2,) — EMA decay for second moment only
+        betas:          (beta2,) — EMA decay for second moment
         eps:            numerical stability term
         weight_decay:   decoupled weight decay
         context_length: number of past gradients to store (K)
-        temperature:    softmax temperature for attention scores
-        mix:            blend g_t with attended (0.0 = all past, 1.0 = all current)
+        mix:            blend g_t with averaged past (0.0 = all past, 1.0 = all current)
     """
 
     def __init__(
@@ -37,13 +37,10 @@ class AttnRawV2(Optimizer):
         eps=1e-8,
         weight_decay=0.0,
         context_length=8,
-        temperature=1.0,
         mix=0.9,
     ):
         if context_length < 1:
             raise ValueError("context_length must be >= 1")
-        if temperature <= 0:
-            raise ValueError("temperature must be positive")
         if not 0.0 <= mix <= 1.0:
             raise ValueError("mix must be in [0, 1]")
 
@@ -53,7 +50,6 @@ class AttnRawV2(Optimizer):
             eps=eps,
             weight_decay=weight_decay,
             context_length=context_length,
-            temperature=temperature,
             mix=mix,
         )
         super().__init__(params, defaults)
@@ -63,20 +59,6 @@ class AttnRawV2(Optimizer):
         state["step"] = 0
         state["exp_avg_sq"] = torch.zeros_like(p, dtype=torch.float32)
         state["grad_history"] = []
-
-    def _compute_attention(
-        self,
-        g_flat: torch.Tensor,
-        history: torch.Tensor,
-        temperature: float,
-    ) -> torch.Tensor:
-        """Cosine attention over past gradients (g_t NOT included)."""
-        g_norm = g_flat.norm().clamp(min=1e-8)
-        history_norms = history.norm(dim=1).clamp(min=1e-8)
-        scores = history @ g_flat
-        scores = scores / (history_norms * g_norm)
-        alpha = torch.softmax(scores / temperature, dim=0)
-        return alpha @ history
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -91,7 +73,6 @@ class AttnRawV2(Optimizer):
             eps = group["eps"]
             wd = group["weight_decay"]
             K = group["context_length"]
-            temperature = group["temperature"]
             mix = group["mix"]
 
             for p in group["params"]:
@@ -111,13 +92,11 @@ class AttnRawV2(Optimizer):
                 past = state["grad_history"][:K]
                 if past:
                     history = torch.stack(past, dim=0)
-                    attended = self._compute_attention(g_flat, history, temperature)
+                    attended = history.mean(dim=0)
                     blended = mix * g_flat + (1.0 - mix) * attended
                 else:
-                    attended = g_flat
                     blended = g_flat
 
-                m_t = blended.reshape_as(p)
                 blended_t = blended.reshape_as(p)
 
                 v = state["exp_avg_sq"]
@@ -132,7 +111,7 @@ class AttnRawV2(Optimizer):
                     p.mul_(1.0 - lr * wd)
 
                 p.addcdiv_(
-                    m_t.to(p.dtype),
+                    blended_t.to(p.dtype),
                     v_hat.sqrt().add_(eps),
                     value=-lr,
                 )

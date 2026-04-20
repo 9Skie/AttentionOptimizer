@@ -87,8 +87,11 @@ def tokenize_and_cache(cache_dir: str = DATA_CACHE_DIR, max_shards=None):
     total_tokens = 0
     token_buf = []
 
+    token = os.environ.get("HF_TOKEN")
     print(f"Streaming {DATASET_NAME} ({DATASET_SPLIT})...")
-    dataset = load_dataset(DATASET_NAME, DATASET_SPLIT, split="train", streaming=True)
+    dataset = load_dataset(
+        DATASET_NAME, DATASET_SPLIT, split="train", streaming=True, token=token
+    )
 
     for doc in dataset:
         tokens = [eot] + enc.encode_ordinary(doc["text"])

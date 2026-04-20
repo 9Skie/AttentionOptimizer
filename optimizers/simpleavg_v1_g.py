@@ -1,12 +1,12 @@
 #
-# AttnRaw V1-G: g_t INCLUDED in attention window + EMA on both moments.
+# SimpleAvg V1-G: g_t INCLUDED in averaging window + EMA on both moments.
 #
-# g_t is part of the attention window. Attention is computed over all gradients.
-# EMA is applied to both m and v. No separate mix parameter since attention
-# weights already determine g_t contribution.
+# g_t is part of the averaging window. Average is computed over all gradients.
+# EMA is applied to both m and v. No separate mix parameter since all window
+# members get equal weight.
 #
-#   window = [g_t, g_t-1, g_t-2, ..., g_t-L]
-#   attended = attention(g_t, window)
+#   window   = [g_t, g_t-1, g_t-2, ..., g_t-L]
+#   attended = mean(window)
 #   m_t = beta1 * m_t-1 + (1 - beta1) * attended
 #   v_t = beta2 * v_t-1 + (1 - beta2) * attended^2
 #
@@ -15,13 +15,12 @@ import torch
 from torch.optim import Optimizer
 
 
-class AttnRawV1G(Optimizer):
+class SimpleAvgV1G(Optimizer):
     """
-    AttnRaw V1-G: g_t in attention window, EMA on both moments.
+    SimpleAvg V1-G: g_t in averaging window, EMA on both moments.
 
-    Note: g_t is included in the attention window, so the softmax attention
-    weights already determine how much g_t contributes vs past gradients.
-    No separate mix parameter needed.
+    Direct counterpart to AttnRaw V1-G: same window structure, but plain
+    uniform average instead of cosine-similarity attention.
 
     Args:
         params:         model parameters
@@ -31,7 +30,6 @@ class AttnRawV1G(Optimizer):
         weight_decay:   decoupled weight decay
         context_length: number of past gradients to store (K)
                         Window includes g_t, total K+1 gradients
-        temperature:    softmax temperature for attention scores
     """
 
     def __init__(
@@ -42,12 +40,9 @@ class AttnRawV1G(Optimizer):
         eps=1e-8,
         weight_decay=0.0,
         context_length=8,
-        temperature=1.0,
     ):
         if context_length < 1:
             raise ValueError("context_length must be >= 1")
-        if temperature <= 0:
-            raise ValueError("temperature must be positive")
 
         defaults = dict(
             lr=lr,
@@ -55,7 +50,6 @@ class AttnRawV1G(Optimizer):
             eps=eps,
             weight_decay=weight_decay,
             context_length=context_length,
-            temperature=temperature,
         )
         super().__init__(params, defaults)
 
@@ -65,20 +59,6 @@ class AttnRawV1G(Optimizer):
         state["exp_avg"] = torch.zeros_like(p, dtype=torch.float32)
         state["exp_avg_sq"] = torch.zeros_like(p, dtype=torch.float32)
         state["grad_history"] = []
-
-    def _compute_attention(
-        self,
-        g_flat: torch.Tensor,
-        window: torch.Tensor,
-        temperature: float,
-    ) -> torch.Tensor:
-        """Cosine attention over window (INCLUDING g_t)."""
-        g_norm = g_flat.norm().clamp(min=1e-8)
-        window_norms = window.norm(dim=1).clamp(min=1e-8)
-        scores = window @ g_flat
-        scores = scores / (window_norms * g_norm)
-        alpha = torch.softmax(scores / temperature, dim=0)
-        return alpha @ window
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -93,7 +73,6 @@ class AttnRawV1G(Optimizer):
             eps = group["eps"]
             wd = group["weight_decay"]
             K = group["context_length"]
-            temperature = group["temperature"]
 
             for p in group["params"]:
                 if p.grad is None:
@@ -111,7 +90,7 @@ class AttnRawV1G(Optimizer):
 
                 past = state["grad_history"][:K]
                 window = torch.stack([g_flat] + past, dim=0)
-                attended = self._compute_attention(g_flat, window, temperature)
+                attended = window.mean(dim=0)
                 attended_t = attended.reshape_as(p)
 
                 m = state["exp_avg"]

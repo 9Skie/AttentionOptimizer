@@ -30,6 +30,7 @@ class GPTConfig:
 # Building blocks                                                     #
 # ------------------------------------------------------------------ #
 
+
 class RMSNorm(nn.Module):
     def __init__(self, dim: int, eps: float = 1e-6):
         super().__init__()
@@ -51,7 +52,7 @@ def precompute_freqs_cis(head_dim: int, seq_len: int, theta: float = 10000.0):
 def apply_rotary_emb(q, k, freqs_cis):
     # q, k: [B, T, n_head, head_dim]
     # freqs_cis: [T, head_dim/2] complex
-    freqs = freqs_cis[:q.shape[1]].unsqueeze(0).unsqueeze(2)  # [1, T, 1, head_dim/2]
+    freqs = freqs_cis[: q.shape[1]].unsqueeze(0).unsqueeze(2)  # [1, T, 1, head_dim/2]
 
     def rotate(x):
         x_ = x.float().reshape(*x.shape[:-1], -1, 2)
@@ -97,7 +98,9 @@ class CausalSelfAttention(nn.Module):
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
         y = F.scaled_dot_product_attention(
-            q, k, v,
+            q,
+            k,
+            v,
             dropout_p=self.dropout if self.training else 0.0,
             is_causal=True,
         )
@@ -114,7 +117,7 @@ class MLP(nn.Module):
 
     def forward(self, x):
         x = self.fc(x)
-        x = F.relu(x).square()   # ReLU²
+        x = F.relu(x).square()  # ReLU²
         return self.proj(x)
 
 
@@ -136,6 +139,7 @@ class Block(nn.Module):
 # GPT                                                                 #
 # ------------------------------------------------------------------ #
 
+
 class GPT(nn.Module):
     def __init__(self, config: GPTConfig):
         super().__init__()
@@ -147,10 +151,12 @@ class GPT(nn.Module):
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
         # Embedding skip connections: one linear per block (no bias)
-        self.embed_skip = nn.ModuleList([
-            nn.Linear(config.n_embd, config.n_embd, bias=False)
-            for _ in range(config.n_layer)
-        ])
+        self.embed_skip = nn.ModuleList(
+            [
+                nn.Linear(config.n_embd, config.n_embd, bias=False)
+                for _ in range(config.n_layer)
+            ]
+        )
 
         # Weight tying: embedding and lm_head share weights
         self.wte.weight = self.lm_head.weight
@@ -165,7 +171,9 @@ class GPT(nn.Module):
         # Scale residual projections by 1/sqrt(2 * n_layer)
         for name, p in self.named_parameters():
             if name.endswith("c_proj.weight"):
-                torch.nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * config.n_layer))
+                torch.nn.init.normal_(
+                    p, mean=0.0, std=0.02 / math.sqrt(2 * config.n_layer)
+                )
 
     def _init_weights(self, module):
         if isinstance(module, (nn.Linear, nn.Embedding)):
@@ -175,12 +183,12 @@ class GPT(nn.Module):
         B, T = idx.shape
         assert T <= self.config.block_size
 
-        x = self.wte(idx)           # [B, T, n_embd]
-        x_embed = x                 # save for skip connections
+        x = self.wte(idx)  # [B, T, n_embd]
+        x_embed = x  # save for skip connections
         freqs_cis = self.freqs_cis[:T]
 
         for i, block in enumerate(self.blocks):
-            x = x + self.embed_skip[i](x_embed)   # embedding skip connection
+            x = x + self.embed_skip[i](x_embed)  # embedding skip connection
             x = block(x, freqs_cis)
 
         x = self.ln_f(x)

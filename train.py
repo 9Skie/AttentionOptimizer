@@ -25,6 +25,9 @@ from optimizers.attnraw_v1_g import AttnRawV1G
 from optimizers.attnraw_v2 import AttnRawV2
 from optimizers.attnraw_v3 import AttnRawV3
 from optimizers.simpleavg_v1 import SimpleAvgV1
+from optimizers.simpleavg_v1_g import SimpleAvgV1G
+from optimizers.simpleavg_v2 import SimpleAvgV2
+from optimizers.simpleavg_v3 import SimpleAvgV3
 
 
 # ------------------------------------------------------------------ #
@@ -152,6 +155,9 @@ def build_optimizer(model, run_cfg):
 
     elif opt_name in (
         "simpleavg_v1",
+        "simpleavg_v1_g",
+        "simpleavg_v2",
+        "simpleavg_v3",
         "attnraw_v1",
         "attnraw_v1_g",
         "attnraw_v2",
@@ -166,6 +172,30 @@ def build_optimizer(model, run_cfg):
                 lr=lr,
                 weight_decay=wd,
                 context_length=cfg.get("context_length", 4),
+                mix=cfg.get("mix", 0.9),
+            )
+        elif opt_name == "simpleavg_v1_g":
+            grad_opt = SimpleAvgV1G(
+                other_params,
+                lr=lr,
+                weight_decay=wd,
+                context_length=cfg.get("context_length", 4),
+            )
+        elif opt_name == "simpleavg_v2":
+            grad_opt = SimpleAvgV2(
+                other_params,
+                lr=lr,
+                weight_decay=wd,
+                context_length=cfg.get("context_length", 4),
+                mix=cfg.get("mix", 0.9),
+            )
+        elif opt_name == "simpleavg_v3":
+            grad_opt = SimpleAvgV3(
+                other_params,
+                lr=lr,
+                weight_decay=wd,
+                context_length=cfg.get("context_length", 4),
+                mix=cfg.get("mix", 0.9),
             )
         elif opt_name == "attnraw_v1":
             grad_opt = AttnRawV1(
@@ -173,7 +203,8 @@ def build_optimizer(model, run_cfg):
                 lr=lr,
                 weight_decay=wd,
                 context_length=cfg.get("context_length", 4),
-                mix_beta=cfg.get("mix_beta", 0.9),
+                temperature=cfg.get("temperature", 1.0),
+                mix=cfg.get("mix", 0.9),
             )
         elif opt_name == "attnraw_v1_g":
             grad_opt = AttnRawV1G(
@@ -182,7 +213,6 @@ def build_optimizer(model, run_cfg):
                 weight_decay=wd,
                 context_length=cfg.get("context_length", 4),
                 temperature=cfg.get("temperature", 1.0),
-                mix_beta=cfg.get("mix_beta", 0.9),
             )
         elif opt_name == "attnraw_v2":
             grad_opt = AttnRawV2(
@@ -190,6 +220,8 @@ def build_optimizer(model, run_cfg):
                 lr=lr,
                 weight_decay=wd,
                 context_length=cfg.get("context_length", 4),
+                temperature=cfg.get("temperature", 1.0),
+                mix=cfg.get("mix", 0.9),
             )
         else:  # attnraw_v3
             grad_opt = AttnRawV3(
@@ -197,7 +229,8 @@ def build_optimizer(model, run_cfg):
                 lr=lr,
                 weight_decay=wd,
                 context_length=cfg.get("context_length", 4),
-                mix_beta=cfg.get("mix_beta", 0.1),
+                temperature=cfg.get("temperature", 1.0),
+                mix=cfg.get("mix", 0.9),
             )
 
         embed_opt = torch.optim.Adam(
@@ -224,6 +257,7 @@ def train(
     max_tokens: int | None = None,
     checkpoint_every: int | None = None,
     resume_from: str | None = None,
+    seed_override: int | None = None,
 ):
     run_cfg = RUNS[run_id]
     tcfg = dict(TRAIN_CONFIG)
@@ -234,6 +268,7 @@ def train(
     env_max_tokens = os.environ.get("MAX_TOKENS")
     env_checkpoint_every = os.environ.get("CHECKPOINT_EVERY")
     env_resume_from = os.environ.get("RESUME_FROM")
+    env_seed = os.environ.get("SEED")
 
     if max_steps_override is None and env_max_steps:
         max_steps_override = _parse_count(env_max_steps)
@@ -243,6 +278,8 @@ def train(
         checkpoint_every = _parse_count(env_checkpoint_every)
     if resume_from is None and env_resume_from:
         resume_from = env_resume_from
+    if seed_override is None and env_seed:
+        seed_override = _parse_count(env_seed)
 
     if max_steps_override is not None and max_tokens is not None:
         raise ValueError("Use only one of max_steps or max_tokens.")
@@ -265,11 +302,14 @@ def train(
 
     tcfg["max_steps"] = max_steps
     if checkpoint_every is None:
-        checkpoint_every = 500
+        checkpoint_every = 0
     if checkpoint_every < 0:
         raise ValueError("checkpoint_every must be >= 0.")
 
-    seed = tcfg["seed"]
+    seed = seed_override
+    if seed is None:
+        seed = run_cfg.get("seed", tcfg["seed"])
+    tcfg["seed"] = seed
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -301,12 +341,15 @@ def train(
 
     # ---- Logging + Checkpoint setup ----
     log_dir = os.path.join(os.environ.get("LOG_DIR", "logs"), run_id)
-    ckpt_dir = os.path.join(os.environ.get("CKPT_DIR", "checkpoints"), run_id)
     os.makedirs(log_dir, exist_ok=True)
-    os.makedirs(ckpt_dir, exist_ok=True)
     log_path = os.path.join(log_dir, "metrics.jsonl")
+    ckpt_dir = os.path.join(os.environ.get("CKPT_DIR", "checkpoints"), run_id)
     ckpt_latest_path = os.path.join(ckpt_dir, "ckpt_latest.pt")
     ckpt_final_path = os.path.join(ckpt_dir, "ckpt_final.pt")
+
+    checkpoint_enabled = checkpoint_every > 0 or resume_from is not None
+    if checkpoint_enabled:
+        os.makedirs(ckpt_dir, exist_ok=True)
 
     def save_checkpoint(step, path):
         payload = {
@@ -406,15 +449,16 @@ def train(
             t0 = time.time()
 
         step += 1
-        if checkpoint_every and step % checkpoint_every == 0:
+        if checkpoint_enabled and checkpoint_every and step % checkpoint_every == 0:
             save_checkpoint(step, ckpt_latest_path)
 
     pbar.close()
 
     # ---- Save checkpoint ----
-    save_checkpoint(step, ckpt_latest_path)
-    save_checkpoint(step, ckpt_final_path)
-    print(f"[{run_id}] Saved checkpoint -> {ckpt_final_path}")
+    if checkpoint_enabled:
+        save_checkpoint(step, ckpt_latest_path)
+        save_checkpoint(step, ckpt_final_path)
+        print(f"[{run_id}] Saved checkpoint -> {ckpt_final_path}")
 
     log_file.close()
 
@@ -437,6 +481,7 @@ if __name__ == "__main__":
         default=None,
         help="Path to checkpoint, or 'latest' for checkpoints/<run_id>/ckpt_latest.pt",
     )
+    parser.add_argument("--seed", type=str, default=None)
     args = parser.parse_args()
 
     if args.run_id not in RUNS:
@@ -449,10 +494,12 @@ if __name__ == "__main__":
     checkpoint_every = (
         _parse_count(args.checkpoint_every) if args.checkpoint_every else None
     )
+    seed = _parse_count(args.seed) if args.seed else None
     train(
         args.run_id,
         max_steps_override=max_steps,
         max_tokens=max_tokens,
         checkpoint_every=checkpoint_every,
         resume_from=args.resume_from,
+        seed_override=seed,
     )
