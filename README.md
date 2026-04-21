@@ -220,7 +220,7 @@ $$q_t = f_\theta([g_t; m_{t-1}; v_{t-1}])$$
 
 $$k_{t-i} = f_\theta([g_{t-i}; m_{t-i-1}; v_{t-i-1}])$$
 
-$$a_{t,i} = \operatorname{softmax}\left(q_t k_{t-i}^T / \tau\right)$$
+$$a_{t,i} = softmax(q_t k_{t-i}^T / \tau)$$
 
 The meta-objective:
 
