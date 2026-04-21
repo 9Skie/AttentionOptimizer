@@ -133,6 +133,26 @@ Goal:
 - determine whether keeping both moments, only $v$, or neither is the main driver
 - compare attention against the averaging baseline under the same state-retention pattern
 
+Figures:
+
+`assets/experiment_1_training_loss_by_optimizer.png` - grouped training-loss curves for baselines, SimpleAvg, and AttnRaw V1/V2/V3.
+
+<img src="assets/experiment_1_training_loss_by_optimizer.png" width="1200"/>
+
+`assets/experiment_1_best_by_group.png` - best curve from each Experiment 1 category.
+
+<img src="assets/experiment_1_best_by_group.png" width="900"/>
+
+Top 5 by final loss:
+
+| Rank | Run ID                | Final Loss | ADAMW Final Loss | Better Than ADAMW |
+| ---: | --------------------- | ---------: | ---------------: | ----------------: |
+|    1 | `SIMPLEAVG-V1-L16`    |   3.830743 |         3.852718 |          0.021975 |
+|    2 | `ATTNRAW-V1-L16-T2.0` |   3.831524 |         3.852718 |          0.021194 |
+|    3 | `ATTNRAW-V1-L8-T2.0`  |   3.831977 |         3.852718 |          0.020741 |
+|    4 | `SIMPLEAVG-V1-L4`     |   3.832002 |         3.852718 |          0.020717 |
+|    5 | `ATTNRAW-V1-L16-T1.0` |   3.832382 |         3.852718 |          0.020336 |
+
 ### Experiment 2
 
 Experiment 2 focuses on the successful V1 family.
@@ -150,6 +170,26 @@ Goal:
 - test how sensitive V1 is to the explicit current/history mix ratio
 - measure whether the ranking is stable across seeds
 
+Figures:
+
+`assets/experiment_2_training_loss_by_optimizer.png` - grouped training-loss curves shown as mean +/- SD across seed sweeps.
+
+<img src="assets/experiment_2_training_loss_by_optimizer.png" width="900"/>
+
+`assets/experiment_2_best_by_group.png` - best curve from each Experiment 2 category.
+
+<img src="assets/experiment_2_best_by_group.png" width="900"/>
+
+Top 5 by mean final loss across seeds:
+
+| Rank | Run ID | Mean Final Loss | ADAMW Mean Final Loss | Better Than ADAMW | Seeds |
+|---:|---|---:|---:|---:|---:|
+| 1 | `SIMPLEAVG-MIX75-L4-T1.0` | 3.826114 | 3.861710 | 0.035596 | 3 |
+| 2 | `ATTNRAW-MIX75-L4-T1.0` | 3.828917 | 3.861710 | 0.032793 | 3 |
+| 3 | `ATTNRAW-MIX90-L4-T1.0` | 3.843053 | 3.861710 | 0.018657 | 3 |
+| 4 | `SIMPLEAVG-MIX90-L4-T1.0` | 3.844118 | 3.861710 | 0.017592 | 3 |
+| 5 | `ADAMW` | 3.861710 | 3.861710 | 0.000000 | 3 |
+
 ## Rerun Layout
 
 The current repo is set up for a clean rerun of the experiments.
@@ -166,44 +206,35 @@ logs/
 
 Run ids are kept unchanged. Seed separation for Experiment 2 happens at the folder level, not by renaming runs.
 
-## Logging Note
-
-- Metrics are written to `metrics.jsonl` at `log_interval` boundaries (default: every 25 steps).
-- The training loop now performs a final flush after the loop so the terminal `max_steps` row (for example `7500`) is also written.
-- Note: jobs that were already running before this code update keep the old behavior until restarted.
-
-## Current Status
-
-The original runs in this repo were useful for exploration, but the optimizer implementations and experiment structure have since been cleaned up. The next step is to rerun the matrix under the current definitions above.
-
-Because of that, old rankings should be treated as historical notes only, not as the final claim of the repo.
-
-## Visualizations
-
-See `assets/` for:
-- `all_curves.png` — all optimizers overlaid
-- `loss_curves.png` — grouped by optimizer variant
-- `final_losses.png` — bar chart comparison
-- `results_table.md` — full results table
-- `summary_by_group.md` — group summary
-
 ## Future Directions
 
 ### AttnMeta (Meta-learned Projection Weights)
 
-AttnMeta replaces hand-crafted attention with a **meta-learned projection** — learned via bi-level optimization to produce update directions tailored to the optimizer's actual loss landscape. Instead of computing attention scores from raw gradients, AttnMeta projects them through a learned network:
+The main practical problem with this entire direction is that the empirical gain over `ADAMW` is real, but still fairly small relative to the systems cost. In the current runs, the best Experiment 1 result improves on `ADAMW` by about `0.57%`, and the best Experiment 2 result improves on the seed-averaged `ADAMW` baseline by about `0.92%`. Averaging those two best-case wins gives roughly a `0.75%` improvement over `ADAMW`.
+
+That is promising, but it is not obviously large enough to justify the extra optimizer state and compute. Even the current history-based variants already require storing `n` additional gradient states, which means roughly `n * k` extra values for a model with `k` total parameters, on top of the usual optimizer state.
+
+`AttnMeta` is the natural next idea: instead of using fixed cosine similarity, learn the history-compression rule itself. In that version, the optimizer would replace hand-crafted attention with a meta-learned projection learned through bi-level optimization:
 
 $$q_t = f_\theta([g_t; m_{t-1}; v_{t-1}])$$
 
 $$k_{t-i} = f_\theta([g_{t-i}; m_{t-i-1}; v_{t-i-1}])$$
 
-$$\text{attention\_score} = \text{softmax}(q_t k_{t-i}^T / \tau)$$
+$$a_{t,i} = \operatorname{softmax}\left(q_t k_{t-i}^T / \tau\right)$$
 
 The meta-objective:
 
-$$\min_\theta \; \mathbb{E}_{\text{task}} \left[L\left(\theta - \alpha \cdot \text{attention\_update}_\theta(g_{1:T})\right)\right]$$
+$$\min_\theta \; \mathbb{E}_{\text{task}} \left[L\left(\theta - \alpha \cdot u_\theta(g_{1:T})\right)\right]$$
 
 where the inner update uses the attention mechanism and the outer meta-loss measures final task performance after several steps.
+
+But this makes the practicality problem even worse. If each projection maps a `k`-dimensional tensor down to size `k / m` for some compression factor `m`, then even just the query and key projections already introduce on the order of:
+
+$$2 \cdot k \cdot (k / m) = 2k^2 / m$$
+
+additional learned parameters, before counting activation storage, optimizer state for those projection weights, and the extra matrix multiplications required at every optimizer step. In other words, even with compression, the added memory footprint and computation can still be enormous.
+
+So the current conclusion is fairly skeptical: this line of work may have genuine promise because it did outperform `ADAMW`, but it is probably not a feasible drop-in replacement unless the memory and compute story improves substantially. Without better state compression, cheaper projections, more sharing across tensors, or some other way of reducing overhead, the gain does not yet look large enough to clearly justify the cost.
 
 ## Reproducibility
 

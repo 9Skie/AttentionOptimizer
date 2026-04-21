@@ -1,5 +1,6 @@
 torch>=2.3.0
 numpy
+matplotlib
 datasets
 tiktoken
 tqdm
