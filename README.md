@@ -14,7 +14,7 @@ That made me look at Adam's first-moment EMA differently: it compresses gradient
 
 The question becomes: instead of forcing optimization history through one fixed EMA, can an optimizer use attention to attend over recent gradients and decide what matters?
 
-## AttnOpt: Tensorwise History Mixing
+## AttnRaw: Tensorwise History Mixing
 
 Adam's first moment is a fixed EMA of the current gradient:
 
